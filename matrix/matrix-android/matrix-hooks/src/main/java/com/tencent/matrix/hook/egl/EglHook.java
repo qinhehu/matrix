@@ -4,6 +4,7 @@ package com.tencent.matrix.hook.egl;
 
 
 import androidx.annotation.Keep;
+import androidx.annotation.Nullable;
 
 import com.tencent.matrix.util.MatrixLog;
 import com.tencent.matrix.hook.AbsHook;
@@ -28,8 +29,14 @@ public class EglHook extends AbsHook {
 
     }
 
+    @Nullable
     @Override
-    protected void onHook() {
+    protected String getNativeLibraryName() {
+        return "matrix-eglhook";
+    }
+
+    @Override
+    protected void onHook(boolean enableDebug) {
         startHook();
     }
 

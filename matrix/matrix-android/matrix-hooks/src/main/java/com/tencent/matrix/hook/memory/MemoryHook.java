@@ -3,6 +3,9 @@ package com.tencent.matrix.hook.memory;
 import android.text.TextUtils;
 
 
+import androidx.annotation.Nullable;
+
+import com.tencent.matrix.hook.BuildConfig;
 import com.tencent.matrix.util.MatrixLog;
 import com.tencent.matrix.hook.AbsHook;
 import com.tencent.matrix.hook.HookManager;
@@ -118,10 +121,13 @@ public class MemoryHook extends AbsHook {
      * notice: it is an exclusive interface
      */
     public void hook() throws HookManager.HookFailedException {
-        HookManager.INSTANCE
-                .clearHooks()
-                .addHook(this)
-                .commitHooks();
+        installHooksNative(BuildConfig.DEBUG);
+    }
+
+    @Nullable
+    @Override
+    protected String getNativeLibraryName() {
+        return "matrix-memoryhook";
     }
 
     @Override
@@ -142,9 +148,10 @@ public class MemoryHook extends AbsHook {
     }
 
     @Override
-    protected void onHook() {
+    protected void onHook(boolean enableDebug) {
         addHookSoNative(mHookSoSet.toArray(new String[0]));
         addIgnoreSoNative(mIgnoreSoSet.toArray(new String[0]));
+        installHooksNative(enableDebug);
     }
 
     public void dump(String logPath, String jsonPath) {
@@ -168,5 +175,7 @@ public class MemoryHook extends AbsHook {
     private native void addIgnoreSoNative(String[] ignoreSoList);
 
     private native void setStacktraceLogThresholdNative(int threshold);
+
+    private native void installHooksNative(boolean enableDebug);
 }
 

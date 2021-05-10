@@ -11,8 +11,8 @@
 #include "Log.h"
 #include <jni.h>
 #include <new>
+#include <common/HookCommon.h>
 #include "MemoryHookCXXFunctions.h"
-#include "HookCommon.h"
 
 #ifdef __cplusplus
 extern "C" {

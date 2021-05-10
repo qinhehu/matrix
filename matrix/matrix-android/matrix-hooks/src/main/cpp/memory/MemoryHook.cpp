@@ -20,10 +20,10 @@
 #include <shared_mutex>
 #include <cJSON.h>
 #include <Log.h>
+#include <common/ThreadPool.h>
 #include "MemoryHookFunctions.h"
 #include "Utils.h"
 #include "unwindstack/Unwinder.h"
-#include "ThreadPool.h"
 #include "BacktraceDefine.h"
 #include "MemoryHookMetas.h"
 #include "MemoryHook.h"
@@ -637,6 +637,10 @@ void memory_hook_on_dlopen(const char *file_name) {
     if (is_stacktrace_enabled) {
         wechat_backtrace::notify_maps_changed();
     }
+
+    // This line only refresh xhook in matrix-memoryhook library now.
+    xhook_refresh(0);
+
     srand((unsigned int) time(NULL));
 }
 

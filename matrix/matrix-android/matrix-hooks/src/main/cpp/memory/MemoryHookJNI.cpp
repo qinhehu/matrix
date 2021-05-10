@@ -2,11 +2,11 @@
 // Created by Yves on 2019-08-08.
 //
 #include <jni.h>
-#include "xhook.h"
+#include <xhook.h>
+#include <xh_errno.h>
+#include <common/HookCommon.h>
 #include "MemoryHookFunctions.h"
 #include "MemoryHook.h"
-#include "xh_errno.h"
-#include "HookCommon.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -123,7 +123,6 @@ Java_com_tencent_matrix_hook_memory_MemoryHook_addHookSoNative(JNIEnv *env, jobj
         hook(regex);
         env->ReleaseStringUTFChars(jregex, regex);
     }
-    add_hook_init_callback(memory_hook_init);
     add_dlopen_hook_callback(memory_hook_on_dlopen);
 }
 
@@ -198,6 +197,17 @@ Java_com_tencent_matrix_hook_memory_MemoryHook_setStacktraceLogThresholdNative(J
                                                                               jint threshold) {
     assert(threshold >= 0);
     set_stacktrace_log_threshold(threshold);
+}
+
+JNIEXPORT void JNICALL
+Java_com_tencent_matrix_hook_memory_MemoryHook_installHooksNative(JNIEnv* env, jobject thiz, jboolean enable_debug) {
+    memory_hook_init();
+
+    xhook_enable_debug(enable_debug ? 1 : 0);
+    xhook_enable_sigsegv_protection(0);
+
+    // This line only refreshes xhook in matrix-memoryhook library now.
+    xhook_refresh(0);
 }
 
 #ifdef __cplusplus

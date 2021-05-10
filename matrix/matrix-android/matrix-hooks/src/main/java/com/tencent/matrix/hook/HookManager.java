@@ -1,7 +1,10 @@
 package com.tencent.matrix.hook;
 
 
+import android.text.TextUtils;
+
 import androidx.annotation.Keep;
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import com.tencent.matrix.util.MatrixLog;
@@ -17,19 +20,17 @@ public class HookManager {
 
     public static final HookManager INSTANCE = new HookManager();
 
-    private volatile boolean hasHooked;
+    private volatile boolean hasHooked = false;
     private Set<AbsHook> mHooks = new HashSet<>();
+    private volatile boolean mEnableDebug = BuildConfig.DEBUG;
 
-    private HookManager(){
+    private NativeLibraryLoader mNativeLibLoader = null;
+
+    public interface NativeLibraryLoader {
+        void loadLibrary(@NonNull String libName);
     }
 
-    private void exclusiveHook() {
-        xhookEnableDebugNative(BuildConfig.DEBUG);
-        xhookEnableSigSegvProtectionNative(!BuildConfig.DEBUG);
-
-        xhookRefreshNative(false);
-
-        hasHooked = true;
+    private HookManager(){
     }
 
     public void commitHooks() throws HookFailedException {
@@ -42,19 +43,54 @@ public class HookManager {
         }
 
         try {
-            System.loadLibrary("matrix-hooks");
+            if (mNativeLibLoader != null) {
+                mNativeLibLoader.loadLibrary("matrix-hookcommon");
+            } else {
+                System.loadLibrary("matrix-hookcommon");
+            }
         } catch (Throwable e) {
             MatrixLog.printErrStackTrace(TAG, e, "");
             return;
         }
 
+        if (!doPreHookInitializeNative()) {
+            throw new HookFailedException("Fail to do hook common pre-hook initialize.");
+        }
+
+        for (AbsHook hook : mHooks) {
+            final String nativeLibName = hook.getNativeLibraryName();
+            if (TextUtils.isEmpty(nativeLibName)) {
+                continue;
+            }
+            try {
+                if (mNativeLibLoader != null) {
+                    mNativeLibLoader.loadLibrary(nativeLibName);
+                } else {
+                    System.loadLibrary(nativeLibName);
+                }
+            } catch (Throwable e) {
+                MatrixLog.printErrStackTrace(TAG, e, "");
+                return;
+            }
+        }
         for (AbsHook hook : mHooks) {
             hook.onConfigure();
         }
         for (AbsHook hook : mHooks) {
-            hook.onHook();
+            hook.onHook(mEnableDebug);
         }
-        exclusiveHook();
+        doFinalInitializeNative();
+        hasHooked = true;
+    }
+
+    public HookManager setEnableDebug(boolean enabled) {
+        mEnableDebug = enabled;
+        return this;
+    }
+
+    public HookManager setNativeLibraryLoader(@Nullable NativeLibraryLoader loader) {
+        mNativeLibLoader = loader;
+        return this;
     }
 
     public HookManager addHook(@Nullable AbsHook hook) {
@@ -97,13 +133,10 @@ public class HookManager {
         return hasHooked;
     }
 
-    private native int xhookRefreshNative(boolean async);
-    private native void xhookEnableDebugNative(boolean flag);
-    private native void xhookEnableSigSegvProtectionNative(boolean flag);
-    private native void xhookClearNative();
+    private native boolean doPreHookInitializeNative();
+    private native void doFinalInitializeNative();
 
     public static class HookFailedException extends Exception {
-
         public HookFailedException(String message) {
             super(message);
         }
