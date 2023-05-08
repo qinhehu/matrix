@@ -2,8 +2,10 @@ package com.tencent.matrix.resource.processor;
 
 import android.os.Build;
 
+import com.tencent.matrix.Matrix;
 import com.tencent.matrix.report.Issue;
 import com.tencent.matrix.resource.CanaryWorkerService;
+import com.tencent.matrix.resource.ResourcePlugin;
 import com.tencent.matrix.resource.analyzer.ActivityLeakAnalyzer;
 import com.tencent.matrix.resource.analyzer.model.ActivityLeakResult;
 import com.tencent.matrix.resource.analyzer.model.AndroidExcludedRefs;
@@ -13,9 +15,8 @@ import com.tencent.matrix.resource.analyzer.model.HeapDump;
 import com.tencent.matrix.resource.analyzer.model.HeapSnapshot;
 import com.tencent.matrix.resource.config.ResourceConfig;
 import com.tencent.matrix.resource.config.SharePluginInfo;
-import com.tencent.matrix.resource.watcher.ActivityRefWatcher;
 import com.tencent.matrix.resource.dumper.AndroidHeapDumper;
-import com.tencent.matrix.resource.dumper.DumpStorageManager;
+import com.tencent.matrix.resource.watcher.ActivityRefWatcher;
 import com.tencent.matrix.util.MatrixLog;
 
 import org.json.JSONException;
@@ -32,7 +33,6 @@ public abstract class BaseLeakProcessor {
 
     private final ActivityRefWatcher mWatcher;
 
-    private DumpStorageManager                mDumpStorageManager;
     private AndroidHeapDumper                 mHeapDumper;
     private AndroidHeapDumper.HeapDumpHandler mHeapDumpHandler;
 
@@ -42,16 +42,10 @@ public abstract class BaseLeakProcessor {
 
     public abstract boolean process(DestroyedActivityInfo destroyedActivityInfo);
 
-    public DumpStorageManager getDumpStorageManager() {
-        if (mDumpStorageManager == null) {
-            mDumpStorageManager = new DumpStorageManager(mWatcher.getContext());
-        }
-        return mDumpStorageManager;
-    }
-
+    @Deprecated
     public AndroidHeapDumper getHeapDumper() {
         if (mHeapDumper == null) {
-            mHeapDumper = new AndroidHeapDumper(mWatcher.getContext(), getDumpStorageManager());
+            mHeapDumper = new AndroidHeapDumper(mWatcher.getContext());
         }
         return mHeapDumper;
     }
@@ -76,20 +70,42 @@ public abstract class BaseLeakProcessor {
     public void onDestroy() {
     }
 
+    private static volatile boolean mAnalyzing = false;
+
+    public static boolean isAnalyzing() {
+        return mAnalyzing;
+    }
+
+    private static void setAnalyzing(boolean analyzing) {
+        mAnalyzing = analyzing;
+    }
+
     protected ActivityLeakResult analyze(File hprofFile, String referenceKey) {
+        setAnalyzing(true);
         final HeapSnapshot heapSnapshot;
         ActivityLeakResult result;
-        final ExcludedRefs excludedRefs = AndroidExcludedRefs.createAppDefaults(Build.VERSION.SDK_INT, Build.MANUFACTURER).build();
+        String manufacture = Matrix.with().getPluginByClass(ResourcePlugin.class).getConfig().getManufacture();
+        final ExcludedRefs excludedRefs = AndroidExcludedRefs.createAppDefaults(Build.VERSION.SDK_INT, manufacture).build();
         try {
             heapSnapshot = new HeapSnapshot(hprofFile);
             result = new ActivityLeakAnalyzer(referenceKey, excludedRefs).analyze(heapSnapshot);
         } catch (IOException e) {
             result = ActivityLeakResult.failure(e, 0);
         }
+        getWatcher().triggerGc();
+        setAnalyzing(false);
         return result;
     }
 
     final protected void publishIssue(int issueType, ResourceConfig.DumpMode dumpMode, String activity, String refKey, String detail, String cost) {
+        publishIssue(issueType, dumpMode, activity, refKey, detail, cost, 0);
+    }
+
+    final protected void publishIssue(int issueType, ResourceConfig.DumpMode dumpMode, String activity, String refKey, String detail, String cost, int retryCount) {
+        publishIssue(issueType, dumpMode, activity, refKey, detail, cost, retryCount, null);
+    }
+
+    final protected void publishIssue(int issueType, ResourceConfig.DumpMode dumpMode, String activity, String refKey, String detail, String cost, int retryCount, String hprofPath) {
         Issue issue = new Issue(issueType);
         JSONObject content = new JSONObject();
         try {
@@ -98,6 +114,8 @@ public abstract class BaseLeakProcessor {
             content.put(SharePluginInfo.ISSUE_REF_KEY, refKey);
             content.put(SharePluginInfo.ISSUE_LEAK_DETAIL, detail);
             content.put(SharePluginInfo.ISSUE_COST_MILLIS, cost);
+            content.put(SharePluginInfo.ISSUE_RETRY_COUNT, retryCount);
+            content.put(SharePluginInfo.ISSUE_HPROF_PATH, hprofPath);
         } catch (JSONException jsonException) {
             MatrixLog.printErrStackTrace(TAG, jsonException, "");
         }

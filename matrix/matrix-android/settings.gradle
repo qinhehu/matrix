@@ -1,4 +1,4 @@
-apply from:"$rootDir/gradle/Arguments.gradle"
+apply from: "$rootDir/gradle/Arguments.gradle"
 
 // Gradle plugin
 include ':matrix-gradle-plugin'
@@ -18,16 +18,26 @@ include ':matrix-sqlite-lint:matrix-sqlite-lint-android-sdk'
 include ':matrix-battery-canary'
 include ':matrix-arscutil'
 include ':matrix-opengl-leak'
+include ':matrix-traffic'
 
 // Components for memory hook
 include ':matrix-backtrace'
 include ':matrix-hooks'
-include ':matrix-jectl'
+include ':matrix-memguard'
+include ':matrix-mallctl'
 include ':matrix-fd'
 
-// Benchmark
-include ':test:matrix-backtrace-benchmark'
+//// Benchmark
+//include ':test:matrix-backtrace-benchmark'
+//
+//// TEST
+//include ':test:test-backtrace'
+//include ':test:test-memoryhook'
+//include ':test:test-openglhook'
+include ':matrix-memory-canary'
 
-// TEST
-include ':test:test-backtrace'
-include ':test:test-memoryhook'
+if (gradle.staticLinkCXX()) {
+    include ':matrix-hooks:cxx-static'
+    include ':matrix-opengl-leak:cxx-static'
+    include ':matrix-backtrace:cxx-static'
+}

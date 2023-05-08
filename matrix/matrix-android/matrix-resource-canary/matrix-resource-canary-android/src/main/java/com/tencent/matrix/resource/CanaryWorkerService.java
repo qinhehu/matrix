@@ -16,13 +16,16 @@
 
 package com.tencent.matrix.resource;
 
+import static com.tencent.matrix.resource.common.utils.StreamUtil.closeQuietly;
+import static com.tencent.matrix.resource.common.utils.StreamUtil.copyFileToStream;
+
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
 
+import com.tencent.matrix.Matrix;
 import com.tencent.matrix.resource.analyzer.model.HeapDump;
 import com.tencent.matrix.resource.hproflib.HprofBufferShrinker;
-import com.tencent.matrix.resource.dumper.DumpStorageManager;
 import com.tencent.matrix.util.MatrixLog;
 
 import java.io.BufferedOutputStream;
@@ -37,9 +40,6 @@ import java.util.Date;
 import java.util.Locale;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
-
-import static com.tencent.matrix.resource.common.utils.StreamUtil.closeQuietly;
-import static com.tencent.matrix.resource.common.utils.StreamUtil.copyFileToStream;
 
 /**
  * Created by tangyinsheng on 2017/7/11.
@@ -100,7 +100,7 @@ public class CanaryWorkerService extends MatrixJobIntentService {
             final PrintWriter pw = new PrintWriter(new OutputStreamWriter(zos, Charset.forName("UTF-8")));
             pw.println("# Resource Canary Result Infomation. THIS FILE IS IMPORTANT FOR THE ANALYZER !!");
             pw.println("sdkVersion=" + Build.VERSION.SDK_INT);
-            pw.println("manufacturer=" + Build.MANUFACTURER);
+            pw.println("manufacturer=" + Matrix.with().getPluginByClass(ResourcePlugin.class).getConfig().getManufacture());
             pw.println("hprofEntry=" + shrinkedHProfEntry.getName());
             pw.println("leakedActivityKey=" + heapDump.getReferenceKey());
             pw.flush();
@@ -125,9 +125,9 @@ public class CanaryWorkerService extends MatrixJobIntentService {
 
     private String getShrinkHprofName(File origHprof) {
         final String origHprofName = origHprof.getName();
-        final int extPos = origHprofName.indexOf(DumpStorageManager.HPROF_EXT);
+        final int extPos = origHprofName.indexOf(".hprof");
         final String namePrefix = origHprofName.substring(0, extPos);
-        return namePrefix + "_shrink" + DumpStorageManager.HPROF_EXT;
+        return namePrefix + "_shrink.hprof";
     }
 
     private String getResultZipName(String prefix) {

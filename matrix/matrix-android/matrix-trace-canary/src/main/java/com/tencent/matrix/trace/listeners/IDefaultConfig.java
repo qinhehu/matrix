@@ -30,11 +30,11 @@ public interface IDefaultConfig {
 
     boolean isAnrTraceEnable();
 
-    boolean isIdleHandlerEnable();
+    boolean isIdleHandlerTraceEnable();
+
+    boolean isTouchEventTraceEnable();
 
     boolean isSignalAnrTraceEnable();
-
-    boolean isMainThreadPriorityTraceEnable();
 
     boolean isDebug();
 

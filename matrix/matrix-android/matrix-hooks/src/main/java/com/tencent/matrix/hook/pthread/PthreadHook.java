@@ -124,6 +124,9 @@ public class PthreadHook extends AbsHook {
     }
 
     public void dump(String path) {
+        if (TextUtils.isEmpty(path)) {
+            throw new IllegalArgumentException("path NOT valid: " + path);
+        }
         if (getStatus() == Status.COMMIT_SUCCESS) {
             dumpNative(path);
         }
@@ -143,7 +146,7 @@ public class PthreadHook extends AbsHook {
         }
     }
 
-    @Nullable
+    @NonNull
     @Override
     protected String getNativeLibraryName() {
         return "matrix-pthreadhook";

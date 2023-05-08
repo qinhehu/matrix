@@ -22,10 +22,11 @@ import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.SystemClock;
 
-import com.tencent.matrix.AppActiveMatrixDelegate;
+import com.tencent.matrix.lifecycle.owners.ProcessUILifecycleOwner;
 import com.tencent.matrix.trace.constants.Constants;
 import com.tencent.matrix.trace.hacker.ActivityThreadHacker;
 import com.tencent.matrix.trace.listeners.IAppMethodBeatListener;
+import com.tencent.matrix.trace.listeners.ILooperListener;
 import com.tencent.matrix.trace.util.Utils;
 import com.tencent.matrix.util.MatrixHandlerThread;
 import com.tencent.matrix.util.MatrixLog;
@@ -68,32 +69,31 @@ public class AppMethodBeat implements BeatLifecycle {
     private static final Object updateTimeLock = new Object();
     private static volatile boolean isPauseUpdateTime = false;
     private static Runnable checkStartExpiredRunnable = null;
-    private static LooperMonitor.LooperDispatchListener looperMonitorListener = new LooperMonitor.LooperDispatchListener() {
+    private static ILooperListener looperMonitorListener = new ILooperListener() {
         @Override
         public boolean isValid() {
             return status >= STATUS_READY;
         }
 
         @Override
-        public void dispatchStart() {
-            super.dispatchStart();
+        public void onDispatchBegin(String log) {
             AppMethodBeat.dispatchBegin();
         }
 
         @Override
-        public void dispatchEnd() {
-            super.dispatchEnd();
+        public void onDispatchEnd(String log, long beginNs, long endNs) {
             AppMethodBeat.dispatchEnd();
+        }
+    };
+    private static Runnable realReleaseRunnable = new Runnable() {
+        @Override
+        public void run() {
+            realRelease();
         }
     };
 
     static {
-        sHandler.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                realRelease();
-            }
-        }, Constants.DEFAULT_RELEASE_BUFFER_DELAY);
+        MatrixHandlerThread.getDefaultHandler().postDelayed(realReleaseRunnable, Constants.DEFAULT_RELEASE_BUFFER_DELAY);
     }
 
     /**
@@ -127,6 +127,7 @@ public class AppMethodBeat implements BeatLifecycle {
         synchronized (statusLock) {
             if (status < STATUS_STARTED && status >= STATUS_EXPIRED_START) {
                 sHandler.removeCallbacks(checkStartExpiredRunnable);
+                MatrixHandlerThread.getDefaultHandler().removeCallbacks(realReleaseRunnable);
                 if (sBuffer == null) {
                     throw new RuntimeException(TAG + " sBuffer == null");
                 }
@@ -168,7 +169,7 @@ public class AppMethodBeat implements BeatLifecycle {
 
     private static void realRelease() {
         synchronized (statusLock) {
-            if (status == STATUS_DEFAULT) {
+            if (status == STATUS_DEFAULT || status <= STATUS_READY) {
                 MatrixLog.i(TAG, "[realRelease] timestamp:%s", System.currentTimeMillis());
                 sHandler.removeCallbacksAndMessages(null);
                 LooperMonitor.unregister(looperMonitorListener);
@@ -181,7 +182,6 @@ public class AppMethodBeat implements BeatLifecycle {
 
     private static void realExecute() {
         MatrixLog.i(TAG, "[realExecute] timestamp:%s", System.currentTimeMillis());
-
         sCurrentDiffTime = SystemClock.uptimeMillis() - sDiffTime;
 
         sHandler.removeCallbacksAndMessages(null);
@@ -253,7 +253,7 @@ public class AppMethodBeat implements BeatLifecycle {
                 mergeData(methodId, sIndex, true);
             } else {
                 sIndex = 0;
-                mergeData(methodId, sIndex, true);
+                 mergeData(methodId, sIndex, true);
             }
             ++sIndex;
             assertIn = false;
@@ -310,7 +310,7 @@ public class AppMethodBeat implements BeatLifecycle {
     }
 
     public static String getVisibleScene() {
-        return AppActiveMatrixDelegate.INSTANCE.getVisibleScene();
+        return ProcessUILifecycleOwner.INSTANCE.getVisibleScene();
     }
 
     /**
@@ -324,15 +324,20 @@ public class AppMethodBeat implements BeatLifecycle {
         if (methodId == AppMethodBeat.METHOD_ID_DISPATCH) {
             sCurrentDiffTime = SystemClock.uptimeMillis() - sDiffTime;
         }
-        long trueId = 0L;
-        if (isIn) {
-            trueId |= 1L << 63;
+
+        try {
+            long trueId = 0L;
+            if (isIn) {
+                trueId |= 1L << 63;
+            }
+            trueId |= (long) methodId << 43;
+            trueId |= sCurrentDiffTime & 0x7FFFFFFFFFFL;
+            sBuffer[index] = trueId;
+            checkPileup(index);
+            sLastIndex = index;
+        } catch (Throwable t) {
+            MatrixLog.e(TAG, t.getMessage());
         }
-        trueId |= (long) methodId << 43;
-        trueId |= sCurrentDiffTime & 0x7FFFFFFFFFFL;
-        sBuffer[index] = trueId;
-        checkPileup(index);
-        sLastIndex = index;
     }
 
     public void addListener(IAppMethodBeatListener listener) {
@@ -359,6 +364,7 @@ public class AppMethodBeat implements BeatLifecycle {
             indexRecord.source = source;
             IndexRecord record = sIndexRecordHead;
             IndexRecord last = null;
+
             while (record != null) {
                 if (indexRecord.index <= record.index) {
                     if (null == last) {
@@ -459,8 +465,8 @@ public class AppMethodBeat implements BeatLifecycle {
                 return data;
             }
             return data;
-        } catch (OutOfMemoryError e) {
-            MatrixLog.e(TAG, e.toString());
+        } catch (Throwable t) {
+            MatrixLog.e(TAG, t.toString());
             return data;
         } finally {
             MatrixLog.i(TAG, "[copyData] [%s:%s] length:%s cost:%sms", Math.max(0, startRecord.index), endRecord.index, data.length, System.currentTimeMillis() - current);

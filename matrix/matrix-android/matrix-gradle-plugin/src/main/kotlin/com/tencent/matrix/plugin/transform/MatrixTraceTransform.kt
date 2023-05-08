@@ -151,7 +151,7 @@ class MatrixTraceTransform(
     }
 
     private fun toOutputFile(outputDir: File, inputDir: File, inputFile: File): File {
-        return File(outputDir, FileUtils.relativePossiblyNonExistingPath(inputFile, inputDir))
+        return File(outputDir, inputFile.toRelativeString(inputDir))
     }
 
     private fun configure(transformInvocation: TransformInvocation): Configuration {
@@ -247,7 +247,9 @@ class MatrixTraceTransform(
                 traceClassDirectoryOutput = outputDirectory,
                 inputToOutput = inputToOutput,
                 legacyReplaceChangedFile = null,
-                legacyReplaceFile = null)
+                legacyReplaceFile = null,
+                uniqueOutputName = true
+        )
 
         val cost = System.currentTimeMillis() - start
         Log.i(TAG, " Insert matrix trace instrumentations cost time: %sms.", cost)

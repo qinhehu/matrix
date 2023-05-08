@@ -32,7 +32,7 @@ import com.tencent.matrix.trace.tracer.IdleHandlerLagTracer;
 import com.tencent.matrix.trace.tracer.LooperAnrTracer;
 import com.tencent.matrix.trace.tracer.SignalAnrTracer;
 import com.tencent.matrix.trace.tracer.StartupTracer;
-import com.tencent.matrix.trace.tracer.ThreadPriorityTracer;
+import com.tencent.matrix.trace.tracer.TouchEventLagTracer;
 import com.tencent.matrix.util.MatrixHandlerThread;
 import com.tencent.matrix.util.MatrixLog;
 
@@ -49,7 +49,8 @@ public class TracePlugin extends Plugin {
     private LooperAnrTracer looperAnrTracer;
     private SignalAnrTracer signalAnrTracer;
     private IdleHandlerLagTracer idleHandlerLagTracer;
-    private ThreadPriorityTracer threadPriorityTracer;
+    private TouchEventLagTracer touchEventLagTracer;
+    private final int sdkInt = Build.VERSION.SDK_INT;
 
     public TracePlugin(TraceConfig config) {
         this.traceConfig = config;
@@ -59,7 +60,7 @@ public class TracePlugin extends Plugin {
     public void init(Application app, PluginListener listener) {
         super.init(app, listener);
         MatrixLog.i(TAG, "trace plugin init, trace config: %s", traceConfig.toString());
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN) {
+        if (sdkInt < Build.VERSION_CODES.JELLY_BEAN) {
             MatrixLog.e(TAG, "[FrameBeat] API is low Build.VERSION_CODES.JELLY_BEAN(16), TracePlugin is not supported");
             unSupportPlugin();
             return;
@@ -86,7 +87,7 @@ public class TracePlugin extends Plugin {
             @Override
             public void run() {
 
-                if (willUiThreadMonitorRunning(traceConfig)) {
+                if (sdkInt < Build.VERSION_CODES.N && willUiThreadMonitorRunning(traceConfig)) {
                     if (!UIThreadMonitor.getMonitor().isInit()) {
                         try {
                             UIThreadMonitor.getMonitor().init(traceConfig);
@@ -109,9 +110,14 @@ public class TracePlugin extends Plugin {
                     looperAnrTracer.onStartTrace();
                 }
 
-                if (traceConfig.isIdleHandlerEnable()) {
+                if (traceConfig.isIdleHandlerTraceEnable()) {
                     idleHandlerLagTracer = new IdleHandlerLagTracer(traceConfig);
                     idleHandlerLagTracer.onStartTrace();
+                }
+
+                if (traceConfig.isTouchEventTraceEnable()) {
+                    touchEventLagTracer = new TouchEventLagTracer(traceConfig);
+                    touchEventLagTracer.onStartTrace();
                 }
 
                 if (traceConfig.isSignalAnrTraceEnable()) {
@@ -119,11 +125,6 @@ public class TracePlugin extends Plugin {
                         signalAnrTracer = new SignalAnrTracer(traceConfig);
                         signalAnrTracer.onStartTrace();
                     }
-                }
-
-                if (traceConfig.isMainThreadPriorityTraceEnable()) {
-                    threadPriorityTracer = new ThreadPriorityTracer();
-                    threadPriorityTracer.onStartTrace();
                 }
 
                 if (traceConfig.isFPSEnable()) {
@@ -148,7 +149,6 @@ public class TracePlugin extends Plugin {
             MatrixLog.w(TAG, "start TracePlugin in Thread[%s] but not in mainThread!", Thread.currentThread().getId());
             MatrixHandlerThread.getDefaultMainHandler().post(runnable);
         }
-
     }
 
     @Override
@@ -182,11 +182,6 @@ public class TracePlugin extends Plugin {
                 if (idleHandlerLagTracer != null) {
                     idleHandlerLagTracer.onCloseTrace();
                 }
-
-                if (threadPriorityTracer != null) {
-                    threadPriorityTracer.onCloseTrace();
-                }
-
             }
         };
 

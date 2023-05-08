@@ -1,28 +1,32 @@
 package com.tencent.matrix.batterycanary.monitor.feature;
 
 
+import android.os.Handler;
 import android.os.SystemClock;
-import androidx.annotation.NonNull;
 
 import com.tencent.matrix.batterycanary.monitor.BatteryMonitorCore;
+import com.tencent.matrix.batterycanary.utils.Function;
+import com.tencent.matrix.util.MatrixLog;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.Callable;
+
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+
+import static com.tencent.matrix.batterycanary.utils.BatteryCanaryUtil.ONE_MIN;
 
 public interface MonitorFeature {
     void configure(BatteryMonitorCore monitor);
-
     void onTurnOn();
-
     void onTurnOff();
-
     void onForeground(boolean isForeground);
-
     void onBackgroundCheck(long duringMillis);
-
     int weight();
+
 
     @SuppressWarnings("rawtypes")
     abstract class Snapshot<RECORD extends Snapshot> {
@@ -64,11 +68,29 @@ public interface MonitorFeature {
                 dlt.isDelta = true;
             }
 
+            public Delta(RECORD bgn, RECORD end, RECORD dlt) {
+                this.bgn = bgn;
+                this.end = end;
+                this.during = end.time - bgn.time;
+                this.dlt = dlt;
+                dlt.isDelta = true;
+            }
+
             public boolean isValid() {
                 return bgn.isValid() && end.isValid();
             }
 
             protected abstract RECORD computeDelta();
+
+            public static class SimpleDelta<RECORD extends Snapshot> extends Delta<RECORD> {
+                public SimpleDelta(RECORD bgn, RECORD end, RECORD dlt) {
+                    super(bgn, end, dlt);
+                }
+                @Override
+                protected RECORD computeDelta() {
+                    throw new RuntimeException("stub!");
+                }
+            }
         }
 
         public abstract static class Entry<ENTRY> {
@@ -410,6 +432,157 @@ public interface MonitorFeature {
                         }
                     }
                     return diff;
+                }
+            }
+        }
+
+        public static class Sampler {
+            private static final String TAG = "Matrix.battery.Sampler";
+            public static final Integer INVALID = Integer.MIN_VALUE;
+
+            final String mTag;
+            final Handler mHandler;
+            final Function<Sampler, ? extends Number> mSamplingBlock;
+
+            private final Runnable mSamplingTask = new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        Number currSample = mSamplingBlock.apply(Sampler.this);
+                        if (!currSample.equals(INVALID)) {
+                            mSampleLst = currSample.doubleValue();
+                            mCount++;
+                            // FIXME: calc vag on finished
+                            mSampleAvg = (mSampleAvg * (mCount - 1) + mSampleLst) / mCount;
+                            if (mSampleFst == Double.MIN_VALUE) {
+                                mSampleFst = mSampleLst;
+                                mSampleMax = mSampleLst;
+                                mSampleMin = mSampleLst;
+                            } else {
+                                if (mSampleLst > mSampleMax) {
+                                    mSampleMax = mSampleLst;
+                                }
+                                if (mSampleLst < mSampleMin) {
+                                    mSampleMin = mSampleLst;
+                                }
+                            }
+                        }
+                    } catch (Exception e) {
+                        MatrixLog.printErrStackTrace(TAG, e, "onSamplingFailed: " + e);
+                    } finally {
+                        if (!mPaused) {
+                            mHandler.postDelayed(this, mInterval);
+                        }
+                    }
+                }
+            };
+
+            boolean mPaused = true;
+            long mInterval = ONE_MIN;
+            int mCount = 0;
+            long mBgnMillis = 0;
+            long mEndMillis = 0;
+            double mSampleFst = Double.MIN_VALUE;
+            double mSampleLst = Double.MIN_VALUE;
+            double mSampleMax = Double.MIN_VALUE;
+            double mSampleMin = Double.MIN_VALUE;
+            double mSampleAvg = Double.MIN_VALUE;
+
+            public Sampler(Handler handler, Callable<? extends Number> onSampling) {
+                this("dft", handler, onSampling);
+            }
+
+            public Sampler(String tag, Handler handler, final Callable<? extends Number> onSampling) {
+                mTag = tag;
+                mHandler = handler;
+                mSamplingBlock = new Function<Sampler, Number>() {
+                    @Override
+                    public Number apply(Sampler sampler) {
+                        try {
+                            return onSampling.call();
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
+                        }
+                    }
+                };
+            }
+
+            public Sampler(String tag, Handler handler, Function<Sampler, ? extends Number> onSampling) {
+                mTag = tag;
+                mHandler = handler;
+                mSamplingBlock = onSampling;
+            }
+
+            public String getTag() {
+                return mTag;
+            }
+
+            public int getCount() {
+                return mCount;
+            }
+
+            public void setInterval(long interval) {
+                if (interval > 0) {
+                    mInterval = interval;
+                }
+            }
+
+            public void start() {
+                mPaused = false;
+                mBgnMillis = SystemClock.uptimeMillis();
+                mHandler.postDelayed(mSamplingTask, mInterval);
+            }
+
+            public void pause() {
+                mPaused = true;
+                mEndMillis = SystemClock.uptimeMillis();
+                mHandler.removeCallbacks(mSamplingTask);
+            }
+
+            @Nullable
+            public Result getResult() {
+                if (mCount <= 0) {
+                    MatrixLog.w(TAG, "Sampling count is invalid: " + mCount);
+                    return null;
+                }
+                if (mBgnMillis <= 0 || mEndMillis <= 0 || mBgnMillis > mEndMillis) {
+                    MatrixLog.w(TAG, "Sampling bgn/end millis is invalid: " + mBgnMillis + " - " + mEndMillis);
+                    return null;
+                }
+                Result result = new Result();
+                result.interval = mInterval;
+                result.count = mCount;
+                result.duringMillis = mEndMillis - mBgnMillis;
+                result.sampleFst = mSampleFst;
+                result.sampleLst = mSampleLst;
+                result.sampleMax = mSampleMax;
+                result.sampleMin = mSampleMin;
+                result.sampleAvg = mSampleAvg;
+                return result;
+            }
+
+            public static final class Result {
+                public long interval;
+                public int count;
+                public long duringMillis;
+                public double sampleFst;
+                public double sampleLst;
+                public double sampleMax;
+                public double sampleMin;
+                public double sampleAvg;
+
+                @Override
+                public String toString() {
+                    return "Result{" +
+                            "interval=" + interval +
+                            ", count=" + count +
+                            ", duringMillis=" + duringMillis +
+                            ", sampleFst=" + sampleFst +
+                            ", sampleLst=" + sampleLst +
+                            ", sampleMax=" + sampleMax +
+                            ", sampleMin=" + sampleMin +
+                            ", sampleAvg=" + sampleAvg +
+                            '}';
                 }
             }
         }
